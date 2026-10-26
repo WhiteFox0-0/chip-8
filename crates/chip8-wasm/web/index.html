@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chip8</title>
+<style>
+  :root { color-scheme: dark; --line: #1f2630; --card: #121820; --dim: #7c8794; --green: #39ff14; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px; background: #0b0d10; color: #d7dde3;
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #library { max-width: 900px; margin: 0 auto; }
+  #play { max-width: 640px; margin: 0 auto; }
+  header { margin-bottom: 28px; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; }
+  h2 {
+    margin: 32px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  h2 span { color: #4b5560; letter-spacing: 0; text-transform: none; }
+  .sub { margin: 6px 0 0; color: var(--dim); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+  .grid.compact { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  .card {
+    display: flex; flex-direction: column; padding: 0; overflow: hidden; text-align: left;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    color: #cfd6dd; font: inherit; cursor: pointer;
+  }
+  .card:hover { border-color: #39434f; background: #161d25; }
+  .card canvas {
+    display: block; width: 100%; aspect-ratio: 2 / 1;
+    image-rendering: pixelated; background: #050607; border-bottom: 1px solid var(--line);
+  }
+  .card span { padding: 9px 11px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grid.compact .card span { padding: 6px 8px; font-size: 11px; }
+  .player-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  #title { margin: 0; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; }
+  button.plain {
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: #cfd6dd; font: inherit; cursor: pointer;
+  }
+  button.plain:hover { background: #1a222b; }
+  canvas#screen {
+    display: block; width: 100%; max-width: 640px; aspect-ratio: 2 / 1;
+    background: #050607; border: 1px solid var(--line); border-radius: 8px;
+    image-rendering: pixelated;
+  }
+  .legend { margin: 14px 0 0; color: #55606d; font-size: 12px; line-height: 1.7; }
+  .legend b { color: #8b96a3; font-weight: 600; }
+  .controls { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .controls .label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    padding: 6px 12px; border: 0; background: var(--card); color: #8b96a3;
+    font: inherit; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: #1c2732; color: #e6edf3; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="library">
+  <header>
+    <h1>chip8</h1>
+    <p class="sub">Pick a game, or run the test suite.</p>
+  </header>
+  <h2>Games</h2>
+  <div class="grid" id="games"></div>
+  <h2>Test suite <span>&mdash; Timendus</span></h2>
+  <div class="grid" id="tests"></div>
+</div>
+
+<div id="play" hidden>
+  <div class="player-head">
+    <h1 id="title"></h1>
+    <button class="plain" id="back">&larr; library</button>
+  </div>
+  <canvas id="screen" width="64" height="32"></canvas>
+  <p class="legend" id="legend"></p>
+  <div class="controls">
+    <span class="label">controls</span>
+    <div class="seg" id="controls">
+      <button data-mode="classic" class="active">classic keypad</button>
+      <button data-mode="game">game keys</button>
+    </div>
+  </div>
+  <h2>Switch game</h2>
+  <div class="grid compact" id="other"></div>
+</div>
+
+<script type="module">
+import init, { Emulator } from './pkg/chip8_wasm.js';
+
+const GAMES = [
+  { id: 'pong', name: 'Pong', group: 'games', rom: 'roms/pong.ch8' },
+  { id: 'tetris', name: 'Tetris', group: 'games', rom: 'roms/tetris.ch8' },
+  { id: 'invaders', name: 'Space Invaders', group: 'games', rom: 'roms/invaders.ch8' },
+  { id: 'breakout', name: 'Breakout', group: 'games', rom: 'roms/breakout.ch8' },
+  { id: 'tron', name: 'Tron', group: 'games', rom: 'roms/tron.ch8' },
+  { id: 'logo', name: '1. CHIP-8 logo', group: 'tests', rom: 'roms/tests/1-chip8-logo.ch8' },
+  { id: 'ibm', name: '2. IBM logo', group: 'tests', rom: 'roms/tests/2-ibm-logo.ch8' },
+  { id: 'corax', name: '3. Corax+', group: 'tests', rom: 'roms/tests/3-corax+.ch8' },
+  { id: 'flags', name: '4. Flags', group: 'tests', rom: 'roms/tests/4-flags.ch8' },
+  { id: 'quirks', name: '5. Quirks', group: 'tests', rom: 'roms/tests/5-quirks.ch8' },
+  { id: 'keypad', name: '6. Keypad', group: 'tests', rom: 'roms/tests/6-keypad.ch8' },
+  { id: 'beep', name: '7. Beep', group: 'tests', rom: 'roms/tests/7-beep.ch8' },
+  { id: 'scrolling', name: '8. Scrolling', group: 'tests', rom: 'roms/tests/8-scrolling.ch8' },
+];
+
+const CLASSIC = {
+  '1': 0x1, '2': 0x2, '3': 0x3, '4': 0xC,
+  'q': 0x4, 'w': 0x5, 'e': 0x6, 'r': 0xD,
+  'a': 0x7, 's': 0x8, 'd': 0x9, 'f': 0xE,
+  'z': 0xA, 'x': 0x0, 'c': 0xB, 'v': 0xF,
+};
+
+const CLASSIC_LEGEND = '<b>1 2 3 4</b> &rarr; 1 2 3 C &nbsp; <b>Q W E R</b> &rarr; 4 5 6 D<br>' +
+                       '<b>A S D F</b> &rarr; 7 8 9 E &nbsp; <b>Z X C V</b> &rarr; A 0 B F';
+
+const GAME_KEYS = {
+  pong: {
+    label: '<b>W/S</b> or <b>&uarr;/&darr;</b> &mdash; paddle up/down',
+    map: { w: 0x1, arrowup: 0x1, s: 0x4, arrowdown: 0x4 },
+  },
+  breakout: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; paddle &nbsp; <b>Space</b> &mdash; start',
+    map: { a: 0x4, arrowleft: 0x4, d: 0x6, arrowright: 0x6, ' ': 0x0 },
+  },
+  invaders: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; move &nbsp; <b>Space</b> or <b>W/&uarr;</b> &mdash; fire/start',
+    map: { a: 0x4, arrowleft: 0x4, d: 0x6, arrowright: 0x6, ' ': 0x5, w: 0x5, arrowup: 0x5 },
+  },
+  tetris: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; move &nbsp; <b>W/&uarr;</b> &mdash; rotate &nbsp; <b>S/&darr;</b> &mdash; drop',
+    map: { a: 0x5, arrowleft: 0x5, d: 0x6, arrowright: 0x6, w: 0x4, arrowup: 0x4, s: 0x7, arrowdown: 0x7 },
+  },
+  tron: {
+    label: '<b>F/B</b> select mode &nbsp; <b>Space</b> start &nbsp; P1 <b>WASD</b> &nbsp; P2 <b>arrows</b>',
+    map: {
+      f: 0xF, b: 0xB, ' ': 0x0,
+      w: 0x1, s: 0x4, a: 0x3, d: 0xC,
+      arrowup: 0x7, arrowdown: 0xA, arrowleft: 0x9, arrowright: 0xE,
+    },
+  },
+};
+
+let mode = localStorage.getItem('chip8-controls') === 'classic' ? 'classic' : 'game';
+let games = [];
+let current = null;
+let roms = new Map();
+let emu = null;
+let gen = 0;
+let last = 0;
+let acc = 0;
+const held = new Set();
+
+const screen = document.getElementById('screen');
+const screenCtx = screen.getContext('2d');
+const screenImage = screenCtx.createImageData(64, 32);
+for (let i = 3; i < screenImage.data.length; i += 4) screenImage.data[i] = 255;
+
+function paint(ctx, image, fb) {
+  const d = image.data;
+  for (let p = 0; p < 2048; p++) {
+    const on = (fb[p >> 3] >> (7 - (p & 7))) & 1;
+    const o = p * 4;
+    d[o] = on ? 57 : 9;
+    d[o + 1] = on ? 255 : 12;
+    d[o + 2] = on ? 20 : 18;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+function activeMap() {
+  if (mode === 'game' && current && GAME_KEYS[current.id]) return GAME_KEYS[current.id].map;
+  return CLASSIC;
+}
+
+function mapped(e) {
+  return activeMap()[e.key.toLowerCase()];
+}
+
+function press(k, down) {
+  if (emu) emu.key(k, down);
+}
+
+addEventListener('keydown', (e) => {
+  const k = mapped(e);
+  if (k === undefined || !emu) return;
+  e.preventDefault();
+  if (held.has(k)) return;
+  held.add(k);
+  press(k, true);
+});
+addEventListener('keyup', (e) => {
+  const k = mapped(e);
+  if (k === undefined || !emu) return;
+  e.preventDefault();
+  held.delete(k);
+  press(k, false);
+});
+addEventListener('blur', () => {
+  for (const k of held) press(k, false);
+  held.clear();
+});
+
+const controls = document.getElementById('controls');
+function renderLegend() {
+  const g = mode === 'game' && current && GAME_KEYS[current.id];
+  document.getElementById('legend').innerHTML = g
+    ? '<b>' + current.name + '</b> &mdash; ' + g.label
+    : CLASSIC_LEGEND;
+}
+function setMode(next) {
+  if (next === mode) return;
+  for (const k of held) press(k, false);
+  held.clear();
+  mode = next;
+  localStorage.setItem('chip8-controls', mode);
+  for (const b of controls.children) b.classList.toggle('active', b.dataset.mode === mode);
+  renderLegend();
+}
+controls.onclick = (e) => {
+  const b = e.target.closest('button');
+  if (b) setMode(b.dataset.mode);
+};
+for (const b of controls.children) b.classList.toggle('active', b.dataset.mode === mode);
+renderLegend();
+
+function preview(g) {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 32;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(64, 32);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = 255;
+
+  const e = new Emulator();
+  e.load_rom(roms.get(g.id));
+  for (let f = 0; f < 150; f++) {
+    for (let i = 0; i < 12; i++) e.step();
+    e.tick();
+  }
+  paint(ctx, img, e.framebuffer());
+  return c;
+}
+
+function card(g) {
+  const b = document.createElement('button');
+  b.className = 'card';
+  const name = document.createElement('span');
+  name.textContent = g.name;
+  b.append(preview(g), name);
+  b.onclick = () => open(g);
+  return b;
+}
+
+function renderGroup(id, group) {
+  document.getElementById(id).replaceChildren(
+    ...games.filter((g) => g.group === group).map(card)
+  );
+}
+
+function renderOther() {
+  document.getElementById('other').replaceChildren(
+    ...games.filter((g) => g.id !== current.id).map(card)
+  );
+}
+
+function loop(now, my) {
+  if (my !== gen) return;
+  acc += now - last;
+  last = now;
+  if (acc > 250) acc = 16.7;
+  while (acc >= 16.7) {
+    for (let i = 0; i < 12; i++) emu.step();
+    emu.tick();
+    acc -= 16.7;
+  }
+  paint(screenCtx, screenImage, emu.framebuffer());
+  requestAnimationFrame((t) => loop(t, my));
+}
+
+function open(g) {
+  current = g;
+  held.clear();
+  document.getElementById('library').hidden = true;
+  document.getElementById('play').hidden = false;
+  document.getElementById('title').textContent = g.name;
+  renderOther();
+  renderLegend();
+
+  emu = new Emulator();
+  emu.load_rom(roms.get(g.id));
+  const my = ++gen;
+  last = performance.now();
+  acc = 0;
+  requestAnimationFrame((t) => loop(t, my));
+  scrollTo(0, 0);
+}
+
+function back() {
+  gen++;
+  emu = null;
+  current = null;
+  held.clear();
+  renderLegend();
+  document.getElementById('play').hidden = true;
+  document.getElementById('library').hidden = false;
+}
+
+document.getElementById('back').onclick = back;
+
+init()
+  .then(async () => {
+    const entries = await Promise.all(GAMES.map(async (g) => {
+      const res = await fetch(encodeURI(g.rom));
+      if (!res.ok) throw new Error('missing ROM: ' + g.rom);
+      return [g.id, new Uint8Array(await res.arrayBuffer())];
+    }));
+    roms = new Map(entries);
+    games = GAMES;
+    renderGroup('games', 'games');
+    renderGroup('tests', 'tests');
+  })
+  .catch((err) => {
+    document.querySelector('.sub').textContent = 'Could not load the emulator: ' + err.message;
+  });
+</script>
+</body>
+</html>
