@@ -1,0 +1,55 @@
+# Rust build output (single target dir at the workspace root)
+/target/
+**/target/
+
+# Library crates should not commit a lockfile; this workspace has binaries,
+# so Cargo.lock IS committed. Do not ignore it.
+
+# Debug / profiling artifacts
+**/*.rs.bk
+*.pdb
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+callgrind.out.*
+
+# Fuzzing
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+
+# Benchmarks (criterion)
+/target/criterion/
+
+# WASM build output
+/crates/chip8-wasm/pkg/
+/crates/chip8-wasm/web/pkg/
+/crates/chip8-wasm/web/roms/
+node_modules/
+
+# Test ROMs fetched by scripts/fetch-test-roms.sh (keep roms/README.md)
+/roms/test/*
+!/roms/test/.gitkeep
+
+# Local config and secrets
+.env
+.env.*
+*.local
+
+# Editors and IDEs
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.helix/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
