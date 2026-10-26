@@ -20,7 +20,8 @@ Static browser build:
 
 ```bash
 wasm-pack build crates/chip8-wasm --target web --out-dir web/pkg
-cp -r crates/chip8-web/roms crates/chip8-wasm/web/roms
+mkdir -p crates/chip8-wasm/web/roms
+cp -r crates/chip8-web/roms/. crates/chip8-wasm/web/roms/
 python3 -m http.server 8081 -d crates/chip8-wasm/web
 ```
 
