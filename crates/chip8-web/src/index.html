@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chip8</title>
+<style>
+  :root { color-scheme: dark; --line: #1f2630; --card: #121820; --dim: #7c8794; --green: #39ff14; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px; background: #0b0d10; color: #d7dde3;
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #library { max-width: 900px; margin: 0 auto; }
+  #play { max-width: 640px; margin: 0 auto; }
+  header { margin-bottom: 28px; }
+  h1 { margin: 0; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; }
+  h2 {
+    margin: 32px 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  h2 span { color: #4b5560; letter-spacing: 0; text-transform: none; }
+  .sub { margin: 6px 0 0; color: var(--dim); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+  .grid.compact { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+  .card {
+    display: flex; flex-direction: column; padding: 0; overflow: hidden; text-align: left;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    color: #cfd6dd; font: inherit; cursor: pointer;
+  }
+  .card:hover { border-color: #39434f; background: #161d25; }
+  .card img {
+    display: block; width: 100%; aspect-ratio: 2 / 1; object-fit: contain;
+    image-rendering: pixelated; background: #050607; border-bottom: 1px solid var(--line);
+  }
+  .card span { padding: 9px 11px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grid.compact .card span { padding: 6px 8px; font-size: 11px; }
+  .player-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+  #title { margin: 0; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; }
+  button.plain {
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: #cfd6dd; font: inherit; cursor: pointer;
+  }
+  button.plain:hover { background: #1a222b; }
+  canvas {
+    display: block; width: 100%; max-width: 640px; aspect-ratio: 2 / 1;
+    background: #050607; border: 1px solid var(--line); border-radius: 8px;
+    image-rendering: pixelated;
+  }
+  .legend { margin: 14px 0 0; color: #55606d; font-size: 12px; line-height: 1.7; }
+  .legend b { color: #8b96a3; font-weight: 600; }
+  .controls { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .controls .label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    padding: 6px 12px; border: 0; background: var(--card); color: #8b96a3;
+    font: inherit; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: #1c2732; color: #e6edf3; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="library">
+  <header>
+    <h1>chip8</h1>
+    <p class="sub">Pick a game, or run the test suite.</p>
+  </header>
+  <h2>Games</h2>
+  <div class="grid" id="games"></div>
+  <h2>Test suite <span>&mdash; Timendus</span></h2>
+  <div class="grid" id="tests"></div>
+</div>
+
+<div id="play" hidden>
+  <div class="player-head">
+    <h1 id="title"></h1>
+    <button class="plain" id="back">&larr; library</button>
+  </div>
+  <canvas id="screen" width="64" height="32"></canvas>
+  <p class="legend" id="legend"></p>
+  <div class="controls">
+    <span class="label">controls</span>
+    <div class="seg" id="controls">
+      <button data-mode="classic" class="active">classic keypad</button>
+      <button data-mode="game">game keys</button>
+    </div>
+  </div>
+  <h2>Switch game</h2>
+  <div class="grid compact" id="other"></div>
+</div>
+
+<script>
+const CLASSIC = {
+  '1': 0x1, '2': 0x2, '3': 0x3, '4': 0xC,
+  'q': 0x4, 'w': 0x5, 'e': 0x6, 'r': 0xD,
+  'a': 0x7, 's': 0x8, 'd': 0x9, 'f': 0xE,
+  'z': 0xA, 'x': 0x0, 'c': 0xB, 'v': 0xF,
+};
+
+const CLASSIC_LEGEND = '<b>1 2 3 4</b> &rarr; 1 2 3 C &nbsp; <b>Q W E R</b> &rarr; 4 5 6 D<br>' +
+                       '<b>A S D F</b> &rarr; 7 8 9 E &nbsp; <b>Z X C V</b> &rarr; A 0 B F';
+
+const GAME_KEYS = {
+  pong: {
+    label: '<b>W/S</b> or <b>&uarr;/&darr;</b> &mdash; paddle up/down',
+    map: { w: 0x1, arrowup: 0x1, s: 0x4, arrowdown: 0x4 },
+  },
+  breakout: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; paddle &nbsp; <b>Space</b> &mdash; start',
+    map: { a: 0x4, arrowleft: 0x4, d: 0x6, arrowright: 0x6, ' ': 0x0 },
+  },
+  invaders: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; move &nbsp; <b>Space</b> or <b>W/&uarr;</b> &mdash; fire/start',
+    map: { a: 0x4, arrowleft: 0x4, d: 0x6, arrowright: 0x6, ' ': 0x5, w: 0x5, arrowup: 0x5 },
+  },
+  tetris: {
+    label: '<b>A/D</b> or <b>&larr;/&rarr;</b> &mdash; move &nbsp; <b>W/&uarr;</b> &mdash; rotate &nbsp; <b>S/&darr;</b> &mdash; drop',
+    map: { a: 0x5, arrowleft: 0x5, d: 0x6, arrowright: 0x6, w: 0x4, arrowup: 0x4, s: 0x7, arrowdown: 0x7 },
+  },
+  tron: {
+    label: '<b>F/B</b> select mode &nbsp; <b>Space</b> start &nbsp; P1 <b>WASD</b> &nbsp; P2 <b>arrows</b>',
+    map: {
+      f: 0xF, b: 0xB, ' ': 0x0,
+      w: 0x1, s: 0x4, a: 0x3, d: 0xC,
+      arrowup: 0x7, arrowdown: 0xA, arrowleft: 0x9, arrowright: 0xE,
+    },
+  },
+};
+
+let mode = localStorage.getItem('chip8-controls') === 'classic' ? 'classic' : 'game';
+
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+const image = ctx.createImageData(64, 32);
+for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255;
+
+let games = [];
+let current = null;
+let stream = null;
+const held = new Set();
+
+function key(k, down) {
+  fetch('/key/' + k.toString(16) + '/' + (down ? 'down' : 'up'), { method: 'POST' }).catch(() => {});
+}
+
+function activeMap() {
+  if (mode === 'game' && current && GAME_KEYS[current.id]) return GAME_KEYS[current.id].map;
+  return CLASSIC;
+}
+
+function mapped(e) {
+  return activeMap()[e.key.toLowerCase()];
+}
+
+addEventListener('keydown', (e) => {
+  const k = mapped(e);
+  if (k === undefined || !current) return;
+  e.preventDefault();
+  if (held.has(k)) return;
+  held.add(k);
+  key(k, true);
+});
+addEventListener('keyup', (e) => {
+  const k = mapped(e);
+  if (k === undefined || !current) return;
+  e.preventDefault();
+  held.delete(k);
+  key(k, false);
+});
+addEventListener('blur', () => {
+  for (const k of held) key(k, false);
+  held.clear();
+});
+
+const controls = document.getElementById('controls');
+function renderLegend() {
+  const g = mode === 'game' && current && GAME_KEYS[current.id];
+  document.getElementById('legend').innerHTML = g
+    ? '<b>' + current.name + '</b> &mdash; ' + g.label
+    : CLASSIC_LEGEND;
+}
+function setMode(next) {
+  if (next === mode) return;
+  for (const k of held) key(k, false);
+  held.clear();
+  mode = next;
+  localStorage.setItem('chip8-controls', mode);
+  for (const b of controls.children) b.classList.toggle('active', b.dataset.mode === mode);
+  renderLegend();
+}
+controls.onclick = (e) => {
+  const b = e.target.closest('button');
+  if (b) setMode(b.dataset.mode);
+};
+for (const b of controls.children) b.classList.toggle('active', b.dataset.mode === mode);
+renderLegend();
+
+function card(g) {
+  const b = document.createElement('button');
+  b.className = 'card';
+  const img = document.createElement('img');
+  img.src = '/preview/' + encodeURIComponent(g.id) + '.svg';
+  img.alt = '';
+  img.loading = 'lazy';
+  const name = document.createElement('span');
+  name.textContent = g.name;
+  b.append(img, name);
+  b.onclick = () => open(g);
+  return b;
+}
+
+function renderGroup(id, group) {
+  document.getElementById(id).replaceChildren(
+    ...games.filter((g) => g.group === group).map(card)
+  );
+}
+
+function renderOther() {
+  document.getElementById('other').replaceChildren(
+    ...games.filter((g) => g.id !== current.id).map(card)
+  );
+}
+
+function open(g) {
+  current = g;
+  held.clear();
+  document.getElementById('library').hidden = true;
+  document.getElementById('play').hidden = false;
+  document.getElementById('title').textContent = g.name;
+  renderOther();
+  renderLegend();
+
+  if (stream) stream.close();
+  stream = new EventSource('/events?game=' + encodeURIComponent(g.id));
+  stream.onmessage = drawFrame;
+
+  scrollTo(0, 0);
+}
+
+function back() {
+  if (stream) { stream.close(); stream = null; }
+  current = null;
+  held.clear();
+  renderLegend();
+  document.getElementById('play').hidden = true;
+  document.getElementById('library').hidden = false;
+}
+
+const bytes = new Uint8Array(256);
+function drawFrame(ev) {
+  const [hex] = ev.data.split('|');
+  for (let i = 0; i < 256; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+
+  const d = image.data;
+  for (let p = 0; p < 2048; p++) {
+    const on = (bytes[p >> 3] >> (7 - (p & 7))) & 1;
+    const o = p * 4;
+    d[o] = on ? 57 : 9;
+    d[o + 1] = on ? 255 : 12;
+    d[o + 2] = on ? 20 : 18;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+document.getElementById('back').onclick = back;
+
+fetch('/api/games')
+  .then((r) => r.json())
+  .then((list) => {
+    games = list;
+    renderGroup('games', 'games');
+    renderGroup('tests', 'tests');
+  });
+</script>
+</body>
+</html>
